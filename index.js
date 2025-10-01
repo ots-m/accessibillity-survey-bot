@@ -169,7 +169,7 @@ class UserSession {
     );
 
     return {
-      source: "web",
+      source: "telegram-bot",
       respondent_identifier: this.respondentId,
       answers: transformedAnswers,
     };
@@ -330,14 +330,14 @@ bot.on("callback_query", async (query) => {
 
   await bot.answerCallbackQuery(query.id);
 
-  const session = userSessions.get(chatId, respondentId);
+  const session = userSessions.get(chatId);
 
-  switch (true) {
-    case data === "blind_version":
-      await startBlindVersion(chatId);
+  switch (data) {
+    case "blind_version":
+      await startBlindVersion(chatId, respondentId);
       break;
 
-    case data === "standard_version":
+    case "standard_version":
       await bot.sendMessage(
         chatId,
         "Для прохождения стандартной версии опроса, пожалуйста, перейдите по ссылке:\n\n[Открыть форму](https://forms.yandex.ru)",
@@ -345,13 +345,13 @@ bot.on("callback_query", async (query) => {
       );
       break;
 
-    case data === "repeat":
+    case "repeat":
       if (session) {
         await sendQuestion(chatId, session);
       }
       break;
 
-    case data === "previous_question":
+    case "previous_question":
       if (session) {
         await session.previousQuestion();
         await YandexSpeech.textToSpeech(chatId, "Предыдущий вопрос");
@@ -360,7 +360,7 @@ bot.on("callback_query", async (query) => {
       }
       break;
 
-    case data === "skip":
+    case "skip":
       if (session) {
         const skipped = session.skipQuestion();
         if (skipped) {
@@ -377,39 +377,54 @@ bot.on("callback_query", async (query) => {
       }
       break;
 
-    case data.startsWith("answer_"):
-      if (session) {
-        const optionIndex = parseInt(data.split("_")[1]);
-        const question = session.getCurrentQuestion();
-
-        if (question && question.options_list[optionIndex]) {
-          await processAnswer(
-            chatId,
-            session,
-            question.options_list[optionIndex]
-          );
-        }
-      }
+    case "restart":
+      await startBlindVersion(chatId, respondentId);
       break;
 
-    case data === "restart":
-      await startBlindVersion(chatId);
-      break;
+    case "home":
+      await YandexSpeech.textToSpeech(
+        chatId,
+        "Добро пожаловать в бот для анкетирования! Выберите версию опроса. 1 - Версия для незрячих 2 - Стандартная верси. Вы можете нажать на кнопку или ввести номер варианта."
+      );
 
-    case data === "home":
-      bot.emit("message", { chat: { id: chatId }, text: "/start" });
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: "Версия для незрячих", callback_data: "blind_version" }],
+          [{ text: "Стандартная версия", callback_data: "standard_version" }],
+        ],
+      };
+
+      await bot.sendMessage(
+        chatId,
+        "Добро пожаловать в бот для анкетирования!\n\nВыберите версию опроса:\n\n1 - Версия для незрячих\n2 - Стандартная версия\n\nВы можете нажать на кнопку или ввести номер варианта.",
+        { parse_mode: "Markdown", reply_markup: keyboard }
+      );
       break;
 
     default:
+      if (data.startsWith("answer_")) {
+        if (session) {
+          const optionIndex = parseInt(data.split("_")[1]);
+          const question = session.getCurrentQuestion();
+
+          if (question && question.options_list[optionIndex]) {
+            await processAnswer(
+              chatId,
+              session,
+              question.options_list[optionIndex]
+            );
+          }
+        }
+      }
       break;
   }
 });
 
-async function startBlindVersion(chatId) {
+async function startBlindVersion(chatId, respondentId) {
   try {
     const questions = await FormAPI.getQuestions(CONFIG.api.formId);
 
-    const session = new UserSession(chatId);
+    const session = new UserSession(chatId, respondentId);
     session.questions = questions;
     userSessions.set(chatId, session);
 
@@ -418,9 +433,9 @@ async function startBlindVersion(chatId) {
       "Бот будет задавать вопросы по одному\n" +
       "Вы можете отвечать текстом или голосом\n" +
       "Для выбора варианта введите его номер\n" +
-      "Введите 0 или нажмите кнопку для повтора или скажите фразу 'повторить' в голосовое сообщение\n" +
-      "Для возврата к предыдущему вопросу нужно ввести или отправить голосовое сообщение с словом 'назад'\n" +
-      "Необязательные вопросы можно пропустить с помощью написания или отправки голосового сообщения со словом 'пропустить'\n\n" +
+      "Введите 0 или нажмите кнопку для повтора или скажите фразу 'повторить' или 'повторить вопрос' в голосовое сообщение\n" +
+      "Для возврата к предыдущему вопросу нужно ввести или отправить голосовое сообщение с словом 'назад' или 'предыдущий вопрос'\n" +
+      "Необязательные вопросы можно пропустить с помощью написания или отправки голосового сообщения со словом 'пропустить' или 'пропустить вопрос'\n\n" +
       "Начинаем!";
 
     await bot.sendMessage(chatId, instructionText, { parse_mode: "Markdown" });
@@ -428,7 +443,7 @@ async function startBlindVersion(chatId) {
 
     await sendQuestion(chatId, session);
   } catch (error) {
-    await YandexSpeech(
+    await YandexSpeech.textToSpeech(
       chatId,
       "Ошибка при загрузке вопросов. Попробуйте позже."
     );
@@ -444,10 +459,11 @@ bot.on("message", async (msg) => {
   if (msg.text && msg.text.startsWith("/")) return;
 
   const chatId = msg.chat.id;
+  const respondentId = msg.from.id;
   const text = msg.text ? msg.text.trim().toLowerCase() : "";
 
   if (text === "1" && !userSessions.has(chatId)) {
-    await startBlindVersion(chatId);
+    await startBlindVersion(chatId, respondentId);
     return;
   }
 
@@ -469,7 +485,7 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  if (text === "назад") {
+  if (text === "назад" || text === "предыдущий вопрос") {
     await session.previousQuestion();
     await YandexSpeech.textToSpeech(chatId, "Предыдущий вопрос");
     await bot.sendMessage(chatId, "Предыдущий вопрос");
@@ -495,11 +511,15 @@ bot.on("message", async (msg) => {
 
   if (!session.waitingForAnswer) {
     if (text === "1") {
-      await startBlindVersion(chatId);
+      await startBlindVersion(chatId, respondentId);
       return;
     }
-    if (text === "2" || text === "на главную" || text === "домой") {
-      bot.emit("message", { chat: { id: chatId }, text: "/start" });
+    if (text === "2" || text === "на главную") {
+      bot.emit("message", {
+        chat: { id: chatId },
+        from: { id: respondentId },
+        text: "/start",
+      });
       return;
     }
     return;
@@ -548,6 +568,117 @@ bot.on("voice", async (msg) => {
         `Распознано: "${recognizedText}"`
       );
       await bot.sendMessage(chatId, `Распознано: "${recognizedText}"`);
+
+      const normalizedText = recognizedText.trim().toLowerCase();
+      const question = session.getCurrentQuestion();
+
+      if (
+        normalizedText === "повторить" ||
+        normalizedText === "повторить вопрос" ||
+        normalizedText === "0"
+      ) {
+        await sendQuestion(chatId, session);
+        return;
+      }
+
+      if (
+        normalizedText === "назад" ||
+        normalizedText === "предыдущий вопрос"
+      ) {
+        await session.previousQuestion();
+        await YandexSpeech.textToSpeech(chatId, "Предыдущий вопрос");
+        await bot.sendMessage(chatId, "Предыдущий вопрос");
+        await sendQuestion(chatId, session);
+        return;
+      }
+
+      if (
+        normalizedText === "пропустить" ||
+        normalizedText === "пропустить вопрос"
+      ) {
+        const skipped = session.skipQuestion();
+        if (skipped) {
+          await YandexSpeech.textToSpeech(chatId, "Вопрос пропущен");
+          await bot.sendMessage(chatId, "Вопрос пропущен");
+          await sendQuestion(chatId, session);
+        } else {
+          await YandexSpeech.textToSpeech(
+            chatId,
+            "Этот вопрос обязателен для ответа"
+          );
+          await bot.sendMessage(chatId, "Этот вопрос обязателен для ответа");
+        }
+        return;
+      }
+
+      if (
+        question &&
+        (question.q_type === "select" || question.q_type === "checkbox") &&
+        question.options_list.length > 0
+      ) {
+        const num = parseInt(normalizedText);
+        if (num > 0 && num <= question.options_list.length) {
+          await processAnswer(chatId, session, question.options_list[num - 1]);
+          return;
+        }
+
+        const matchedOption = question.options_list.find(
+          (option) => option.toLowerCase() === normalizedText
+        );
+
+        if (matchedOption) {
+          await processAnswer(chatId, session, matchedOption);
+          return;
+        }
+
+        const partialMatch = question.options_list.find(
+          (option) =>
+            option.toLowerCase().includes(normalizedText) ||
+            normalizedText.includes(option.toLowerCase())
+        );
+
+        if (partialMatch) {
+          await YandexSpeech.textToSpeech(
+            chatId,
+            `Вы имели в виду вариант: "${partialMatch}"? Подтвердите или повторите ответ.`
+          );
+          await bot.sendMessage(
+            chatId,
+            `Вы имели в виду вариант: "${partialMatch}"?\n\nНажмите кнопку для подтверждения или повторите ответ.`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: `Да, ${partialMatch}`,
+                      callback_data: `answer_${question.options_list.indexOf(
+                        partialMatch
+                      )}`,
+                    },
+                  ],
+                  [{ text: "Повторить вопрос", callback_data: "repeat" }],
+                ],
+              },
+            }
+          );
+          return;
+        }
+
+        await YandexSpeech.textToSpeech(
+          chatId,
+          `Ответ не соответствует доступным вариантам. Введите номер варианта от 1 до ${question.options_list.length} или произнесите точное название варианта.`
+        );
+        await bot.sendMessage(
+          chatId,
+          `Ответ не соответствует доступным вариантам.\n\nДоступные варианты:\n${question.options_list
+            .map((opt, i) => `${i + 1}. ${opt}`)
+            .join(
+              "\n"
+            )}\n\nВведите номер варианта или произнесите точное название.`
+        );
+        return;
+      }
+
       await processAnswer(chatId, session, recognizedText);
     } else {
       await YandexSpeech.textToSpeech(
