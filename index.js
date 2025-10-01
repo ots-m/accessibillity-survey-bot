@@ -399,6 +399,7 @@ bot.on("callback_query", async (query) => {
         "Добро пожаловать в бот для анкетирования!\n\nВыберите версию опроса:\n\n1 - Версия для незрячих\n2 - Стандартная версия\n\nВы можете нажать на кнопку или ввести номер варианта.",
         { parse_mode: "Markdown", reply_markup: keyboard }
       );
+      userSessions.delete(chatId);
       break;
 
     default:
