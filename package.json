@@ -1,19 +1,33 @@
 {
   "name": "accessibillity-survey-bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Telegram bot for conducting surveys with accessibility features",
   "main": "index.js",
   "scripts": {
     "dev": "nodemon index.js",
-    "start": "node index.js"
+    "build": "echo 'Build completed'",
+    "start": "NODE_ENV=production node index.js"
   },
-  "keywords": [],
+  "keywords": [
+    "telegram",
+    "bot",
+    "accessibility",
+    "survey",
+    "speech-to-text",
+    "text-to-speech"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.12.2",
     "dotenv": "^17.2.2",
-    "node-telegram-bot-api": "^0.66.0",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "devDependencies": {
     "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=10.1.0"
   }
 }
